@@ -1,6 +1,7 @@
 package org.example.socets;
 
 import org.example.files.Pages;
+import org.example.home.HttpStatusImageDownloader;
 import org.example.request.HttpRequest;
 import org.example.response.HttpResponse;
 
@@ -10,17 +11,15 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import static org.example.request.RequestMapper.mapToHttpRequest;
 
-public class Connections {
+public class NewConnections {
 
     private static final int TIMEOUT = 1000;
 
     public void createConnection(int port) throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(10);
+//        ExecutorService executor = Executors.newFixedThreadPool(10);
 
         ServerSocket socket = new ServerSocket(port);
 
@@ -29,7 +28,7 @@ public class Connections {
             Socket connection = socket.accept();
             System.out.println("Client connection successfully created!");
 
-            executor.submit(() -> connectionHandler(connection));
+            connectionHandler(connection);
         }
     }
 
@@ -49,7 +48,7 @@ public class Connections {
         return new String(buffer, 0, length);
     }
 
-    private Optional<HttpRequest> requestWorker(Socket connection) throws Exception {
+    private String requestWorker(Socket connection) throws Exception {
         InputStream is = connection.getInputStream();
         String requestText = read(is);
         if(!requestText.isEmpty()) {
@@ -57,9 +56,9 @@ public class Connections {
             System.out.println("-------------------------------");
             System.out.println("REQUEST => " + request);
             System.out.println("-------------------------------");
-            return Optional.of(request);
+            return request.getPath();
         } else {
-            return Optional.empty();
+            return "";
         }
     }
 
@@ -88,11 +87,37 @@ public class Connections {
     }
 
     private void connectionHandler(Socket connection) {
+
         try {
-            Optional<HttpRequest> optionalHttpRequest = requestWorker(connection);
-            if(optionalHttpRequest.isPresent()) {
-                HttpRequest request = optionalHttpRequest.get();
-                responseWorker(connection, request);
+            HttpResponse response = new HttpResponse();
+            response.setProtocol("HTTP/1.1");
+            try {
+                // get URI at format (/100 or /404 or /ololololololo)
+                String path = requestWorker(connection);
+                // change URI from /100 to 100
+                String uri = path.substring(1);
+                // check URI format (if 100 or 200 or 404 - ok and if ololololololo - throw pageNotFound.html)
+                if(isInteger(uri)) {
+                    download(Integer.parseInt(uri), response);
+                } else {
+                    String body = Pages.getPageByPath("/notFound.html");
+                    response.setStatusCode(404);
+                    response.setStatusText("Not Found");
+                    response.setBody(body);
+                }
+
+                String responseText = response.makeResponseText();
+                byte[] responseBytes = responseText.getBytes(StandardCharsets.UTF_8);
+                connection.getOutputStream().write(responseBytes);
+            } catch(Exception e) {
+                String body = Pages.getPageByPath("/notFound.html");
+                response.setStatusCode(404);
+                response.setStatusText("Not Found");
+                response.setBody(body);
+
+                String responseText = response.makeResponseText();
+                byte[] responseBytes = responseText.getBytes(StandardCharsets.UTF_8);
+                connection.getOutputStream().write(responseBytes);
             }
         } catch(Exception e) {
             System.out.println(e.getMessage());
@@ -103,5 +128,29 @@ public class Connections {
                 System.out.println("Can not close connection. Reason: " + ex.getMessage());
             }
         }
+
+    }
+
+
+    public boolean isInteger(String strNum) {
+        if (strNum == null) {
+            return false;
+        }
+        try {
+            Integer.parseInt(strNum);
+        } catch (NumberFormatException nfe) {
+            return false;
+        }
+        return true;
+    }
+
+    public void download(Integer uri,  HttpResponse response) throws Exception {
+        HttpStatusImageDownloader downloader = new HttpStatusImageDownloader();
+        downloader.downloadStatusImage(uri);
+
+        String body = Pages.getPageByPath("/test.html");
+        response.setStatusCode(200);
+        response.setStatusText("OK");
+        response.setBody(body);
     }
 }
